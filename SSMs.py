@@ -114,7 +114,7 @@ pscan = PScan.apply
 
 class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the parametrization of
 # the paper " Resurrecting Linear Recurrences ".
-# The LRU is simulated using Parallel Scan (fast!) when "scan"is set to True (default), otherwise recursively (slow)..
+# The LRU is simulated using Parallel Scan (fast!) when "scan" is set to True (default), otherwise recursively (slow).
     def __init__(self, in_features, out_features, state_features, scan = True, rmin=0.9, rmax=1, max_phase=6.283):
         super().__init__()
         self.state_features = state_features
