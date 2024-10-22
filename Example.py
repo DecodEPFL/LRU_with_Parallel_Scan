@@ -47,6 +47,7 @@ RNN = (DeepLRU
         out_features=odd,
         mid_features=21,
         state_features=hdd,
+        scan = True,
         ))
 
 RNN.cuda()

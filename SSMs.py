@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from sympy import false
 
 
@@ -34,7 +33,6 @@ class MLP(nn.Module): # Simple MLP layer used in the SSM scaffolding later on, c
         else:
             # If x is not 3D, just apply the MLP directly
             x = self.model(x)
-
         return x
 
 
@@ -133,17 +131,17 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
         C_re = torch.randn([out_features, state_features]) / math.sqrt(state_features)
         C_im = torch.randn([out_features, state_features]) / math.sqrt(state_features)
         self.C = nn.Parameter(torch.complex(C_re, C_im))
-        self.state = torch.complex(torch.zeros(state_features), torch.zeros(state_features))
+        self.register_buffer('state', torch.complex(torch.zeros(state_features), torch.zeros(state_features)))
+
+
 
     def forward(self, input):
-        self.state = self.state.to(self.B.device)
+        self.state = self.state
         Lambda_mod = torch.exp(-torch.exp(self.nu_log))
         Lambda_re = Lambda_mod * torch.cos(torch.exp(self.theta_log))
         Lambda_im = Lambda_mod * torch.sin(torch.exp(self.theta_log))
         Lambda = torch.complex(Lambda_re, Lambda_im)  # Eigenvalues matrix
-        Lambda = Lambda.to(self.state.device)
-        gammas = torch.exp(self.gamma_log).unsqueeze(-1).to(self.B.device)
-        gammas = gammas.to(self.state.device)
+        gammas = torch.exp(self.gamma_log).unsqueeze(-1)
         output = torch.empty([i for i in input.shape[:-1]] + [self.out_features], device=self.B.device)
         # Input must be (Batches,Seq_length, Input size), otherwise adds dummy dimension = 1 for batches
         if input.dim() == 2:
@@ -163,7 +161,7 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
             # Prepare matrix Lambda for scan
             Lambda = Lambda.unsqueeze(1)
             A = torch.tile(Lambda, (1, inputBU.shape[1]))
-            # Apply Parallel Scan and get state sequence (initial condition = self.state)
+            # Initial condition
             init = torch.complex(torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device),
                                  torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device))
 
