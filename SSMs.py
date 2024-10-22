@@ -2,8 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
+from sympy import false
 
 
 class MLP(nn.Module): # Simple MLP layer used in the SSM scaffolding later on, can be modified
@@ -11,11 +10,11 @@ class MLP(nn.Module): # Simple MLP layer used in the SSM scaffolding later on, c
         super(MLP, self).__init__()
         # Define the model using nn.Sequential
         self.model = nn.Sequential(
-            nn.Linear(input_size, hidden_size),  # First layer
+            nn.Linear(input_size, hidden_size, bias=false),  # First layer
             nn.SiLU(),  # Activation after the first layer
-            nn.Linear(hidden_size, hidden_size),  # Hidden layer
+            nn.Linear(hidden_size, hidden_size, bias=false),  # Hidden layer
             nn.ReLU(),  # Activation after hidden layer
-            nn.Linear(hidden_size, output_size)  # Output layer (no activation)
+            nn.Linear(hidden_size, output_size, bias=false)  # Output layer (no activation)
         )
 
     def forward(self, x):
@@ -165,8 +164,8 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
             Lambda = Lambda.unsqueeze(1)
             A = torch.tile(Lambda, (1, inputBU.shape[1]))
             # Apply Parallel Scan and get state sequence (initial condition = self.state)
-            init = torch.complex(torch.zeros((self.state_features, inputBU.shape[2])),
-                                 torch.zeros((self.state_features, inputBU.shape[2])))
+            init = torch.complex(torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device),
+                                 torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device))
 
             gammas_reshaped = gammas.unsqueeze(2)  # Shape becomes (State size, 1, 1)
             # Element-wise multiplication
@@ -215,7 +214,7 @@ class SSM(nn.Module):  # Implements LRU + a user-defined scaffolding, this is ou
         self.mlp = MLP(out_features, mlp_hidden_size, out_features)
         self.LRU = LRU(in_features, out_features, state_features, scan, rmin, rmax, max_phase)
         self.model = nn.Sequential(self.LRU, self.mlp)
-        self.lin = nn.Linear(in_features, out_features)
+        self.lin = nn.Linear(in_features, out_features, bias=false)
 
     def forward(self, input):
         result = self.model(input) + self.lin(input)
@@ -225,8 +224,8 @@ class SSM(nn.Module):  # Implements LRU + a user-defined scaffolding, this is ou
 class DeepLRU(nn.Module):  # Implements a cascade of N SSMs. Linear pre- and post-processing can be modified
     def __init__(self, N, in_features, out_features, mid_features, state_features, scan = True):
         super().__init__()
-        self.linin = nn.Linear(in_features, mid_features)
-        self.linout = nn.Linear(mid_features, out_features)
+        self.linin = nn.Linear(in_features, mid_features, bias=false)
+        self.linout = nn.Linear(mid_features, out_features, bias=false)
         self.modelt = nn.ModuleList(
             [SSM(mid_features, mid_features, state_features, scan) for j in range(N)])
         self.modelt.insert(0, self.linin)

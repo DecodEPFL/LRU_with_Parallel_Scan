@@ -25,8 +25,8 @@ t = np.arange(0, np.size(dExp[0, 0], 1) * Ts - Ts, Ts)
 
 t_end = t.size
 
-u = torch.zeros(nExp, t_end, 1)
-y = torch.zeros(nExp, t_end, 3)
+u = torch.zeros(nExp, t_end, 1, device = device)
+y = torch.zeros(nExp, t_end, 3, device = device)
 inputnumberD = 1
 
 for j in range(nExp):
@@ -38,16 +38,18 @@ seed = 55
 torch.manual_seed(seed)
 
 idd = 1
-hdd = 20
+hdd = 40
 odd = yExp[0, 0].shape[0]
 
 RNN = (DeepLRU
-       (N=1,
+       (N=3,
         in_features=idd,
         out_features=odd,
-        mid_features=11,
+        mid_features=21,
         state_features=hdd,
         ))
+
+RNN.cuda()
 
 total_params = sum(p.numel() for p in RNN.parameters())
 print(f"Number of parameters: {total_params}")
@@ -63,7 +65,7 @@ optimizer.zero_grad()
 
 t_end = yExp[0, 0].shape[1]
 
-epochs = 1500
+epochs = 200
 LOSS = np.zeros(epochs)
 
 t0= time.time()
@@ -94,8 +96,8 @@ t_end = yExp_val[0, 0].shape[1]
 
 nExp = yExp_val.size
 
-uval = torch.zeros(nExp, t_end, 1)
-yval = torch.zeros(nExp, t_end, 3)
+uval = torch.zeros(nExp, t_end, 1,  device = device)
+yval = torch.zeros(nExp, t_end, 3,  device = device)
 
 for j in range(nExp):
     inputActive = (torch.from_numpy(dExp_val[0, j])).T
@@ -114,43 +116,43 @@ plt.title("LOSS")
 plt.show()
 
 plt.figure('9')
-plt.plot(yRNN[0, :, 0].detach().numpy(), label='REN')
-plt.plot(y[0, :, 0].detach().numpy(), label='y train')
+plt.plot(yRNN[0, :, 0].cpu().detach().numpy(), label='REN')
+plt.plot(y[0, :, 0].cpu().detach().numpy(), label='y train')
 plt.title("output 1 train single RNN")
 plt.legend()
 plt.show()
 
 plt.figure('10')
-plt.plot(yRNN_val[:, 0].detach().numpy(), label='REN val')
-plt.plot(yval[:, 0].detach().numpy(), label='y val')
+plt.plot(yRNN_val[:, 0].cpu().detach().numpy(), label='REN val')
+plt.plot(yval[:, 0].cpu().detach().numpy(), label='y val')
 plt.title("output 1 val single RNN")
 plt.legend()
 plt.show()
 
 plt.figure('11')
-plt.plot(yRNN[0, :, 1].detach().numpy(), label='REN')
-plt.plot(y[0, :, 1].detach().numpy(), label='y train')
+plt.plot(yRNN[0, :, 1].cpu().detach().numpy(), label='REN')
+plt.plot(y[0, :, 1].cpu().detach().numpy(), label='y train')
 plt.title("output 1 train single RNN")
 plt.legend()
 plt.show()
 
 plt.figure('12')
-plt.plot(yRNN_val[:, 1].detach().numpy(), label='REN val')
-plt.plot(yval[:, 1].detach().numpy(), label='y val')
+plt.plot(yRNN_val[:, 1].cpu().detach().numpy(), label='REN val')
+plt.plot(yval[:, 1].cpu().detach().numpy(), label='y val')
 plt.title("output 1 val single REN")
 plt.legend()
 plt.show()
 
 plt.figure('13')
-plt.plot(yRNN[0, :, 2].detach().numpy(), label='REN')
-plt.plot(y[0, :, 2].detach().numpy(), label='y train')
+plt.plot(yRNN[0, :, 2].cpu().detach().numpy(), label='REN')
+plt.plot(y[0, :, 2].cpu().detach().numpy(), label='y train')
 plt.title("output 1 train single RNN")
 plt.legend()
 plt.show()
 
 plt.figure('14')
-plt.plot(yRNN_val[:, 2].detach().numpy(), label='REN val')
-plt.plot(yval[:, 2].detach().numpy(), label='y val')
+plt.plot(yRNN_val[:, 2].cpu().detach().numpy(), label='REN val')
+plt.plot(yval[:, 2].cpu().detach().numpy(), label='y val')
 plt.title("output 1 val single RNN")
 plt.legend()
 plt.show()
