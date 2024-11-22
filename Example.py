@@ -34,23 +34,25 @@ for j in range(nExp):
     u[j, :, :] = torch.unsqueeze(inputActive[:, inputnumberD], 1)
     y[j, :, :] = (torch.from_numpy(yExp[0, j])).T
 
-seed = 55
-torch.manual_seed(seed)
+#seed = 12
+#torch.manual_seed(seed)
 
 idd = 1
-hdd = 40
+hdd = 3
 odd = yExp[0, 0].shape[0]
 
 RNN = (DeepLRU
-       (N=3,
+       (N=1,
         in_features=idd,
         out_features=odd,
-        mid_features=21,
-        state_features=hdd,
-        scan = True,
+        mid_features=3,
+        state_features=3,
+        scan = False,
         ))
 
 RNN.cuda()
+RNN.set_param()
+
 
 total_params = sum(p.numel() for p in RNN.parameters())
 print(f"Number of parameters: {total_params}")
@@ -66,7 +68,7 @@ optimizer.zero_grad()
 
 t_end = yExp[0, 0].shape[1]
 
-epochs = 200
+epochs = 100
 LOSS = np.zeros(epochs)
 
 t0= time.time()
@@ -84,8 +86,9 @@ for epoch in range(epochs):
     yRNN = torch.squeeze(yRNN)
     loss = MSE(yRNN, y)
     loss.backward()
-    print(u.grad)
     optimizer.step()
+    print(RNN.model[1].LRUR.gamma**2)
+    RNN.set_param()
     print(f"Epoch: {epoch + 1} \t||\t Loss: {loss}")
     LOSS[epoch] = loss
 

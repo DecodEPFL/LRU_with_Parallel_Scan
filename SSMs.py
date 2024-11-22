@@ -135,6 +135,7 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
 
 
 
+
     def forward(self, input):
         self.state = self.state
         Lambda_mod = torch.exp(-torch.exp(self.nu_log))
@@ -146,6 +147,7 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
         # Input must be (Batches,Seq_length, Input size), otherwise adds dummy dimension = 1 for batches
         if input.dim() == 2:
             input = input.unsqueeze(0)
+
 
         if self.scan: # Simulate the LRU with Parallel Scan
             input = input.permute(2, 1, 0)  # (Input size,Seq_length, Batches)
@@ -194,7 +196,7 @@ class LRU(nn.Module):  # Implements a Linear Recurrent Unit (LRU) following the 
                 out_seq = torch.empty(input.shape[1], self.out_features)
                 for j, step in enumerate(batch):
                     self.state = (Lambda * self.state + gammas * self.B @ step.to(dtype=self.B.dtype))
-                    out_step = 2 * (self.C @ self.state).real + self.D @ step
+                    out_step =  (self.C @ self.state).real + self.D @ step
                     out_seq[j] = out_step
                 self.state = torch.complex(torch.zeros_like(self.state.real), torch.zeros_like(self.state.real))
                 output[i] = out_seq
@@ -210,9 +212,13 @@ class SSM(nn.Module):  # Implements LRU + a user-defined scaffolding, this is ou
                  max_phase=6.283):
         super().__init__()
         self.mlp = MLP(out_features, mlp_hidden_size, out_features)
-        self.LRU = LRU(in_features, out_features, state_features, scan, rmin, rmax, max_phase)
-        self.model = nn.Sequential(self.LRU, self.mlp)
+        self.LRUR = LRU_Robust(in_features, out_features, state_features, scan, rmin, rmax, max_phase)
+        self.model = nn.Sequential(self.LRUR, self.mlp)
         self.lin = nn.Linear(in_features, out_features, bias=false)
+
+
+    def set_paramS(self):
+        self.LRUR.set_param()
 
     def forward(self, input):
         result = self.model(input) + self.lin(input)
@@ -229,9 +235,183 @@ class DeepLRU(nn.Module):  # Implements a cascade of N SSMs. Linear pre- and pos
         self.modelt.insert(0, self.linin)
         self.modelt.append(self.linout)
         self.model = nn.Sequential(*self.modelt)
+        self.set_param()
 
+    def set_param(self):
+        # Apply the 'custom_method' to all elements except the first and last
+        for i in range(1, len(self.modelt) - 1):
+            if isinstance(self.modelt[i], SSM):  # Check if it's an instance of CustomModule
+                self.modelt[i].set_paramS()  # Call the custom method
     def forward(self, input):
         result = self.model(input)
         return result
 
 
+# WORK IN PROGRESS
+
+class LRU_Robust(nn.Module):  # Implements a Linear Recurrent Unit (LRU) with trainable l2 gain gamma.
+# The LRU is simulated using Parallel Scan (fast!) when "scan" is set to True (default), otherwise recursively (slow).
+    def __init__(self, in_features, out_features, state_features, scan = True, rmin=0.9, rmax=1, max_phase=6.283):
+        super().__init__()
+        self.state_features = state_features
+        self.in_features = in_features
+        self.out_features = out_features
+        self.scan = scan
+        self.out_features = out_features
+        #Lambda_mod = torch.exp(-torch.exp(self.nu_log))
+        #self.gamma_log = nn.Parameter(torch.log(torch.sqrt(torch.ones_like(Lambda_mod) - torch.square(Lambda_mod))))
+        self.register_buffer('state', torch.complex(torch.zeros(state_features), torch.zeros(state_features)))
+
+
+        self.alpha= nn.Parameter(torch.randn(1,1))
+        self.beta = nn.Parameter(torch.randn(1, 1))
+        self.gamma = nn.Parameter(torch.randn(1, 1)) # l2 gain
+
+        self.epsilon = 0.4
+        #self.register_buffer('B', torch.complex(torch.zeros(state_features,in_features), torch.zeros(state_features, in_features)))
+        #self.register_buffer('D', torch.complex(torch.zeros(in_features, in_features), torch.zeros(in_features, in_features)))
+        self.register_buffer('ID', torch.eye(state_features))
+        self.register_buffer('IDu', torch.eye(in_features))
+
+        self.Skew = nn.Parameter(torch.randn(state_features, state_features))
+        # self.H21 = nn.Parameter(torch.randn(state_features, state_features))
+        # self.H22 = self.g*self.ID # Make H22 a multiple of the identity
+        # self.H23 = nn.Parameter(torch.randn(state_features, state_features))
+
+        # Define each block of X as a parameter
+        self.X11 = nn.Parameter(torch.randn(state_features, state_features))
+        self.X12 = nn.Parameter(torch.randn(state_features, in_features))
+        self.X22 = nn.Parameter(torch.randn(in_features, in_features))
+        self.X21 = nn.Parameter(torch.randn(in_features, state_features))
+
+        self.C = nn.Parameter(torch.randn(out_features, state_features))
+        self.D = nn.Parameter(torch.randn(out_features, in_features))
+
+    def set_param(self):  # Parameter update for L2 gain (free param)
+
+        a = torch.sigmoid(self.alpha)*torch.sigmoid(self.beta)*self.gamma**2
+        b = (1-torch.sigmoid(self.alpha))*torch.sigmoid(self.beta)*self.gamma**2
+        c = torch.sigmoid(self.alpha)*(1-torch.sigmoid(self.beta))*self.gamma**2
+        d = (1-torch.sigmoid(self.alpha))*(1-torch.sigmoid(self.beta))*self.gamma**2
+
+        # Spectral norms of X21, X22 and D
+        norm_X21 = torch.linalg.norm(self.X21, ord=2)
+        norm_X22 = torch.linalg.norm(self.X22, ord=2)
+        norm_D = torch.linalg.norm(self.D, ord=2)
+
+        # Define the modified blocks based on the given constraints
+        X21n = (torch.sqrt(a) / norm_X21) * self.X21
+        X22n = (torch.sqrt(b) / norm_X22) * self.X22
+        Dn = (torch.sqrt(c) / norm_D) * self.D
+
+        # Create a skew-symmetric matrix
+        Sk = self.Skew - self.Skew.T
+        # Create orthogonal matrix via Cayley Transform
+        Q = (self.ID-Sk)@torch.linalg.inv(self.ID+Sk)
+
+
+        # Compute the blocks of H= X*X.T
+        HHt_11 = self.X11 @ self.X11.T + self.X12@self.X12.T+self.C.T@self.C
+        HHt_12 = self.X11 @ X21n.T + self.X12 @ X22n.T + self.C.T@Dn
+        HHt_21 = HHt_12.T
+        HHt_22 = X21n @ X21n.T + X22n @ X22n.T +Dn.T@Dn
+
+        # # Assemble H*H.T in block form
+        # HHt = torch.cat([
+        #     torch.cat([HHt_11, HHt_12], dim=1),
+        #     torch.cat([HHt_21, HHt_22], dim=1)
+        # ], dim=0)
+
+
+        V = HHt_22-self.gamma**2*self.IDu
+        R = HHt_12@torch.linalg.inv(V).T@HHt_12.T
+        # L, U = torch.linalg.eigh(R)
+        # L2, U2 = torch.linalg.eigh(R-HHt_11)
+
+        CR = torch.linalg.cholesky(-R)
+        CRH = torch.linalg.cholesky(-R+HHt_11)
+
+        Atilde = CRH@Q@torch.linalg.inv(CR)
+
+        A = torch.linalg.inv(Atilde).T
+        self.P = -Atilde@R@Atilde.T
+        la= torch.abs(torch.linalg.eigvals(A))
+        #lp = torch.linalg.eigvals(self.P)
+        B = torch.linalg.pinv(HHt_12.T@Atilde.T)@V.T
+        self.B = B
+        self.LambdaM = A
+
+
+
+
+
+
+
+        # row1 = torch.cat([-self.LambdaM.T@self.P@ self.LambdaM+self.P, -self.LambdaM.T@self.P@self.B], dim=1)
+        # row2 = torch.cat([-(self.LambdaM.T@self.P@self.B).T, -self.B.T@self.P@self.B+self.gamma**2*self.IDu], dim=1)
+        # M = torch.cat([row1, row2], dim=0)
+        # eigs = torch.linalg.eigvals(M)
+        #
+        # eigs
+
+    def forward(self, input):
+        self.state = self.state.real
+        output = torch.empty([i for i in input.shape[:-1]] + [self.out_features], device=self.B.device)
+        # Input must be (Batches,Seq_length, Input size), otherwise adds dummy dimension = 1 for batches
+        if input.dim() == 2:
+            input = input.unsqueeze(0)
+
+
+
+        if self.scan: # Simulate the LRU with Parallel Scan
+            input = input.permute(2, 1, 0)  # (Input size,Seq_length, Batches)
+            # Unsqueeze b to make its shape (N, V, 1, 1)
+            B_unsqueezed = self.B.unsqueeze(-1).unsqueeze(-1)
+            # Now broadcast b along dimensions T and D so it can be multiplied elementwise with u
+            B_broadcasted = B_unsqueezed.expand(self.state_features, self.in_features, input.shape[1], input.shape[2])
+            # Expand u so that it can be multiplied along dimension N, resulting in shape (N, V, T, D)
+            input_broadcasted = input.unsqueeze(0).expand(self.state_features, self.in_features, input.shape[1], input.shape[2])
+            # Elementwise multiplication and then sum over V (the second dimension)
+            inputBU = torch.sum(B_broadcasted * input_broadcasted, dim=1) # (State size,Seq_length, Batches)
+
+            # Prepare matrix Lambda for scan
+            Lambda = self.Lambda.unsqueeze(1)
+            A = torch.tile(Lambda, (1, inputBU.shape[1]))
+            # Initial condition
+            init = torch.complex(torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device),
+                                 torch.zeros((self.state_features, inputBU.shape[2]),  device = self.B.device))
+
+            # gammas_reshaped = gammas.unsqueeze(2)  # Shape becomes (State size, 1, 1)
+            # Element-wise multiplication
+            GBU = inputBU
+
+
+            states = pscan(A, GBU, init) # dimensions: (State size,Seq_length, Batches)
+
+            # Prepare output matrices C and D for sequence and batch handling
+            # Unsqueeze C to make its shape (Y, X, 1, 1)
+            C_unsqueezed = self.Cc.unsqueeze(-1).unsqueeze(-1)
+            # Now broadcast C along dimensions T and D so it can be multiplied elementwise with X
+            C_broadcasted = C_unsqueezed.expand(self.out_features, self.state_features, inputBU.shape[1], inputBU.shape[2])
+            # Elementwise multiplication and then sum over V (the second dimension)
+            CX = torch.sum(C_broadcasted * states, dim=1)
+
+            # Unsqueeze D to make its shape (Y, U, 1, 1)
+            D_unsqueezed = self.D.unsqueeze(-1).unsqueeze(-1)
+            # Now broadcast C along dimensions T and D so it can be multiplied elementwise with X
+            D_broadcasted = D_unsqueezed.expand(self.out_features, self.in_features, input.shape[1], input.shape[2])
+            # Elementwise multiplication and then sum over V (the second dimension)
+            DU = torch.sum(D_broadcasted * input, dim=1)
+
+            output = CX.real + DU
+            output = output.permute(2, 1, 0)  # Back to (Batches, Seq length, Input size)
+        else: # Simulate the LRU recursively
+            for i, batch in enumerate(input):
+                out_seq = torch.empty(input.shape[1], self.out_features)
+                for j, step in enumerate(batch):
+                    self.state = (self.LambdaM @ self.state + self.B @ step.to(dtype=self.B.dtype))
+                    out_step = (self.C @ self.state+ self.D @ step).real
+                    out_seq[j] = out_step
+                self.state = torch.zeros_like(self.state.real)
+                output[i] = out_seq
+        return output # Shape (Batches,Seq_length, Input size)
