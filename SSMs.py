@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from sympy import false
+from L-
 
 
 class MLP(nn.Module): # Simple MLP layer used in the SSM scaffolding later on, can be modified
@@ -415,3 +416,6 @@ class LRU_Robust(nn.Module):  # Implements a Linear Recurrent Unit (LRU) with tr
                 self.state = torch.zeros_like(self.state.real)
                 output[i] = out_seq
         return output # Shape (Batches,Seq_length, Input size)
+
+
+
